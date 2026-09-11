@@ -62,7 +62,8 @@ GDScript, organized under `freestyle-dangan-trial/scripts/`:
 ```
 core/       Autoload singletons (see below) + trial/ loader helpers, the
             minigame catalog and AudioStreamLoader
-camera/     CameraDirector autoload + bench_focus_camera rig
+camera/     CameraDirector autoload, motions/ (one CameraMotion per editor
+            motion name) and the bench_focus_camera rig
 config/     MinigameConfig (tuning constants), ResourceRegistry (scene keys), UITheme
 effects/    Spawnable effect scenes' scripts (drift popup, panel shatter, shard burst)
 game/       TrialRoomManager (composition root), CharacterStage, MinigameRunner, roaming text
@@ -88,7 +89,7 @@ sprite-texture cache. `TrialRoomManager` is a composition root that wires
 | `InputManager` | Central input → signals (advance, skip, settings, focus). |
 | `InfluenceGauge` / `ConcentrateGauge` | Player health / slow-time meters (state only; UI scenes bind to them). |
 | `TruthBulletManager` | Evidence available to the current minigame. |
-| `CameraDirector` | Executes per-line camera motions from script data. |
+| `CameraDirector` | Executes per-line camera motions from script data. One at a time: a new motion cancels the running one through its `CameraMotionContext`, which covers the motions that await as well as the ones that tween. |
 | `ScreenEffects` | Full-screen effects requested by script lines. |
 | `Settings` | User preferences persisted to `user://`. |
 | `GameRandom` | Seeded RNG streams so a session is reproducible (`DANGAN_SEED` env var). |

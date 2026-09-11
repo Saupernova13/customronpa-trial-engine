@@ -113,3 +113,150 @@ func test_back_to_back_motions_each_report_once() -> void:
 
 	assert_int(await _run_motion({"type": "zoom_in", "duration": MOTION_DURATION})).is_equal(1)
 	assert_int(await _run_motion({"type": "zoom_out", "duration": MOTION_DURATION})).is_equal(1)
+
+
+# ---------------------------------------------------------------------------
+# Cancellation reaches the motions that await, not only the ones that tween.
+# ---------------------------------------------------------------------------
+## Restores whatever the shake intensity setting was: the shake is a no-op at
+## zero, so these would pass vacuously on a machine whose player turned it off.
+func _with_shake_enabled() -> float:
+	var prior: float = Settings.screen_shake_intensity
+	Settings.screen_shake_intensity = 1.0
+	return prior
+
+
+func test_a_superseded_shake_stops_writing_the_camera() -> void:
+	# Cancellation was `_active_tween.kill()`, and a shake sets no tween - so
+	# nothing stopped it. It kept writing global_position from the origin it
+	# captured before the supersede, then restored the camera to it on the way
+	# out, discarding wherever the motion that replaced it had moved to.
+	var prior := _with_shake_enabled()
+	var camera := _camera()
+	camera.global_position = Vector3.ZERO
+	await get_tree().process_frame
+
+	CameraDirector.execute_motion({"type": "shake", "duration": 0.6})
+	await get_tree().process_frame
+	await get_tree().process_frame
+	CameraDirector.execute_motion({"type": "truck_right", "duration": MOTION_DURATION})
+
+	# Well past the abandoned shake's own duration, so its restore would have
+	# run by now if it were still going to.
+	for _i in range(90):
+		await get_tree().process_frame
+
+	Settings.screen_shake_intensity = prior
+	assert_float(camera.global_position.x).override_failure_message(
+		"camera ended at x=%s; truck_right targeted 0.4" % camera.global_position.x
+	).is_equal_approx(0.4, 0.05)
+
+
+func test_a_superseded_shake_does_not_report_completion() -> void:
+	var prior := _with_shake_enabled()
+	_camera()
+	await get_tree().process_frame
+
+	var completions: Array[int] = [0]
+	var on_done := func() -> void: completions[0] += 1
+	CameraDirector.motion_completed.connect(on_done)
+
+	CameraDirector.execute_motion({"type": "shake", "duration": 0.4})
+	await get_tree().process_frame
+	CameraDirector.execute_motion({"type": "cut", "duration": MOTION_DURATION})
+
+	for _i in range(60):
+		await get_tree().process_frame
+	CameraDirector.motion_completed.disconnect(on_done)
+	Settings.screen_shake_intensity = prior
+
+	assert_int(completions[0]).override_failure_message(
+		"motion_completed fired %d times for two motions, one superseded" % completions[0]
+	).is_equal(1)
+
+
+func test_a_shake_that_runs_to_the_end_still_restores_the_camera() -> void:
+	# The cancellation path must not cost the uncancelled one its restore.
+	var prior := _with_shake_enabled()
+	var camera := _camera()
+	camera.global_position = Vector3(1.0, 2.0, 3.0)
+	await get_tree().process_frame
+
+	assert_int(await _run_motion({"type": "shake", "duration": 0.1})).is_equal(1)
+	Settings.screen_shake_intensity = prior
+	assert_vector(camera.global_position).is_equal_approx(Vector3(1.0, 2.0, 3.0), Vector3.ONE * 0.01)
+
+
+func test_a_superseded_dramatic_zoom_leaves_the_fov_to_its_replacement() -> void:
+	# Its two halves used to be joined by the zoom tween's `finished`, which a
+	# kill suppresses - so the shake half never ran, and the coroutine waiting
+	# on that signal was stranded holding the camera.
+	var prior := _with_shake_enabled()
+	var camera := _camera(55.0)
+	await get_tree().process_frame
+
+	CameraDirector.execute_motion({"type": "dramatic_zoom", "duration": 2.0})
+	await get_tree().process_frame
+	CameraDirector.execute_motion({"type": "zoom_out", "duration": MOTION_DURATION})
+
+	for _i in range(90):
+		await get_tree().process_frame
+
+	Settings.screen_shake_intensity = prior
+	# zoom_out targets 60; the abandoned dramatic zoom was heading for 20.
+	assert_float(camera.fov).override_failure_message(
+		"fov ended at %s; zoom_out targeted 60" % camera.fov
+	).is_equal_approx(60.0, 0.5)
+
+
+# ---------------------------------------------------------------------------
+# The motion table. Every entry has to build and run; before these were
+# objects, a typo in a bind() was only found by authoring a trial that used it.
+# ---------------------------------------------------------------------------
+func test_every_registered_motion_runs_and_reports_once() -> void:
+	var prior := _with_shake_enabled()
+	_camera()
+	await get_tree().process_frame
+
+	for motion_type in CameraDirector._motions:
+		var completions := await _run_motion(
+			{"type": motion_type, "duration": MOTION_DURATION}
+		)
+		assert_int(completions).override_failure_message(
+			"'%s' reported %d completions" % [motion_type, completions]
+		).is_equal(1)
+	Settings.screen_shake_intensity = prior
+
+
+func test_pan_and_tracking_are_the_same_motion() -> void:
+	# They were two identical handlers. Sharing the instance is what stops them
+	# drifting apart again.
+	assert_object(CameraDirector._motions["pan"]).is_same(CameraDirector._motions["tracking"])
+
+
+func test_an_unknown_motion_type_still_reports_completion() -> void:
+	# The signal is what unblocks a waiting caller, and a trial from a newer
+	# minor can name a motion this build has never heard of.
+	_camera()
+	await get_tree().process_frame
+	assert_int(await _run_motion({"type": "warp_drive", "duration": MOTION_DURATION})).is_equal(1)
+
+
+func test_a_relative_rotation_is_applied_from_where_the_camera_is() -> void:
+	var camera := _camera()
+	camera.rotation = Vector3(0.0, 1.0, 0.0)
+	await get_tree().process_frame
+
+	assert_int(await _run_motion({"type": "pan_left", "duration": MOTION_DURATION})).is_equal(1)
+	assert_float(camera.rotation.y).is_equal_approx(1.0 + deg_to_rad(15.0), 0.01)
+
+
+func test_a_truck_moves_along_the_cameras_own_right_axis() -> void:
+	var camera := _camera()
+	camera.global_position = Vector3.ZERO
+	camera.rotation = Vector3(0.0, PI / 2.0, 0.0)
+	await get_tree().process_frame
+
+	assert_int(await _run_motion({"type": "truck_right", "duration": MOTION_DURATION})).is_equal(1)
+	# Yawed 90 degrees, the camera's right points down -Z in world space.
+	assert_float(camera.global_position.z).is_equal_approx(-0.4, 0.05)
