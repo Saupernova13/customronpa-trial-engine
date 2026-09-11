@@ -1,43 +1,133 @@
 extends Node
-
-var _camera: Camera3D
-## One motion owns the camera at a time.
-##
-## Nothing waited for the previous motion or cancelled it, so advancing the
-## script mid-pan left two tweens writing the same property - the camera
-## followed whichever wrote last that frame, and the first tween's `finished`
-## emitted motion_completed while the second was still running. Auto-advance
-## reached this with no player input at all, on any trial whose camera motion
-## outlasts the auto-advance delay.
+## Runs one camera motion at a time, and cancels the one it replaces.
 ##
 ## The newest line's camera direction is the one the author meant to see, so a
 ## new motion supersedes the running one rather than queueing behind it.
-## Killing a Tween suppresses its `finished`, which covers the tweened
-## handlers; the generation covers the ones that finish off an await instead.
-var _active_tween: Tween = null
-var _motion_generation: int = 0
-var _bench_camera: Node
-var _original_fov: float = 30.0
-var _original_position: Vector3
+##
+## Cancellation is the context's, not each motion's. It used to be
+## `_active_tween.kill()` here plus a hand-copied generation guard in four of
+## the handlers - which covered the tweened motions and missed the ones that
+## await, so a superseded shake or cross-dissolve carried on and a fifth
+## handler that forgot the guard was silently wrong.
 
-## The web editor's camera tab -> handlers, filled by _register_motions().
-var _motions: Dictionary = {}
+const CameraMotionContext := preload("res://scripts/camera/camera_motion_context.gd")
+
+const NoOpMotion := preload("res://scripts/camera/motions/no_op_motion.gd")
+const CutMotion := preload("res://scripts/camera/motions/cut_motion.gd")
+const BenchHoldMotion := preload("res://scripts/camera/motions/bench_hold_motion.gd")
+const FovMotion := preload("res://scripts/camera/motions/fov_motion.gd")
+const RotateMotion := preload("res://scripts/camera/motions/rotate_motion.gd")
+const TranslateMotion := preload("res://scripts/camera/motions/translate_motion.gd")
+const PoseMotion := preload("res://scripts/camera/motions/pose_motion.gd")
+const SpinMotion := preload("res://scripts/camera/motions/spin_motion.gd")
+const DutchTiltMotion := preload("res://scripts/camera/motions/dutch_tilt_motion.gd")
+const ResetMotion := preload("res://scripts/camera/motions/reset_motion.gd")
+const ShakeMotion := preload("res://scripts/camera/motions/shake_motion.gd")
+const DramaticZoomMotion := preload("res://scripts/camera/motions/dramatic_zoom_motion.gd")
+const CrossDissolveMotion := preload("res://scripts/camera/motions/cross_dissolve_motion.gd")
 
 ## No production listener - motions are fire-and-forget - but it is the only
 ## way to observe that one finished, and test_camera_director depends on it.
 signal motion_completed
 
-func _ready():
+var _camera: Camera3D
+var _bench_camera: Node
+var _rest_fov: float = 30.0
+var _rest_position: Vector3
+
+## The running motion's context, and the handle that cancels it.
+var _active_context: CameraMotionContext = null
+
+## The web editor's camera tab -> motions, built once in _ready().
+var _motions: Dictionary = {}
+
+
+func _ready() -> void:
 	_register_motions()
+
+
+## Editor motion names -> the object that performs them. A new motion needs one
+## entry here; a variant of an existing one needs only different arguments.
+func _register_motions() -> void:
+	# pan and tracking are the same motion, not two that happen to match.
+	var bench_hold := BenchHoldMotion.new()
+	_motions = {
+		"none": NoOpMotion.new(),
+		"split_screen": NoOpMotion.new(),
+		"cut": CutMotion.new(),
+		"pan": bench_hold,
+		"tracking": bench_hold,
+		"zoom_in": FovMotion.new(20.0),
+		"zoom_out": FovMotion.new(60.0),
+		"shake": ShakeMotion.new(),
+		"dramatic_zoom": DramaticZoomMotion.new(),
+		"spin": SpinMotion.new(),
+		"overhead": PoseMotion.at(Vector3(0, 2.0, 0), Vector3(-PI / 2, 0, 0)),
+		"low_angle": PoseMotion.shifted_by(Vector3(0, -0.3, 0), Vector3(0.2, 0, 0)),
+		# Pans and tilts rotate in place; trucks, pedestals and dollies
+		# translate along the camera's own axes.
+		"pan_left": RotateMotion.new(Vector3(0, deg_to_rad(15.0), 0)),
+		"pan_right": RotateMotion.new(Vector3(0, deg_to_rad(-15.0), 0)),
+		"pan_up": RotateMotion.new(Vector3(deg_to_rad(10.0), 0, 0)),
+		"pan_down": RotateMotion.new(Vector3(deg_to_rad(-10.0), 0, 0)),
+		"tilt_up": RotateMotion.new(Vector3(deg_to_rad(18.0), 0, 0)),
+		"tilt_down": RotateMotion.new(Vector3(deg_to_rad(-18.0), 0, 0)),
+		"rotate_cw": RotateMotion.new(Vector3(0, 0, deg_to_rad(-12.0))),
+		"rotate_ccw": RotateMotion.new(Vector3(0, 0, deg_to_rad(12.0))),
+		"truck_left": TranslateMotion.new(Vector3(-0.4, 0, 0)),
+		"truck_right": TranslateMotion.new(Vector3(0.4, 0, 0)),
+		"pedestal_up": TranslateMotion.new(Vector3(0, 0.3, 0)),
+		"pedestal_down": TranslateMotion.new(Vector3(0, -0.3, 0)),
+		# Backwards for dolly_in, which is wrong and is preserved here on
+		# purpose so this refactor changes nothing an author can see. See #282.
+		"dolly_in": TranslateMotion.new(Vector3(0, 0, 0.5)),
+		"dolly_out": TranslateMotion.new(Vector3(0, 0, -0.5)),
+		"cross_dissolve": CrossDissolveMotion.new(),
+		"dutch_tilt": DutchTiltMotion.new(),
+		"reset": ResetMotion.new(),
+	}
+
+
+func execute_motion(motion_data: Dictionary, target_bench_index: int = -1) -> void:
+	if not _resolve_camera():
+		Log.warn("CameraDirector", "No current Camera3D; skipping camera motion.")
+		motion_completed.emit()
+		return
+
+	if _active_context != null:
+		_active_context.cancel()
+
+	var easing := str(motion_data.get("easing", "ease-in-out"))
+	var ctx := CameraMotionContext.new(_camera, _bench_camera, get_tree())
+	ctx.bench_index = target_bench_index
+	ctx.duration = float(motion_data.get("duration", 1.0))
+	ctx.ease_type = _parse_ease(easing)
+	ctx.trans_type = _parse_trans(easing)
+	ctx.rest_fov = _rest_fov
+	ctx.rest_position = _rest_position
+	_active_context = ctx
+
+	var motion: CameraMotion = _motions.get(str(motion_data.get("type", "none")))
+	if motion == null:
+		motion = _motions["none"]
+	await motion.execute(ctx)
+
+	# Reported only for the motion that is still current. Without this a
+	# superseded one announces the motion that replaced it, and the caller
+	# waiting on the signal unblocks early.
+	if ctx.is_cancelled():
+		return
+	if _active_context == ctx:
+		_active_context = null
+	motion_completed.emit()
+
 
 ## Autoload _ready() runs while the main scene is current, and that is the start
 ## menu, which has no Camera3D - so latching one at startup left every motion a
 ## no-op for the whole session. The reference would dangle again after each
 ## change_scene_to_file, so resolve per call instead.
 ##
-## The rest pose is re-captured whenever a different camera comes into view:
-## _execute_reset returns to the fov the trial camera was authored with, not to
-## whatever a preceding zoom left behind.
+## The rest pose is re-captured whenever a different camera comes into view.
 func _resolve_camera() -> bool:
 	var cam: Camera3D = get_viewport().get_camera_3d()
 	if cam == null:
@@ -46,276 +136,23 @@ func _resolve_camera() -> bool:
 		return false
 	if cam != _camera:
 		_camera = cam
-		_original_fov = cam.fov
-		_original_position = cam.global_position
+		_rest_fov = cam.fov
+		_rest_position = cam.global_position
 		_bench_camera = cam if cam.has_method("jump_to_bench") else null
 	return true
 
-## Editor motion names -> handlers taking
-## (bench_index, duration, ease_type, trans_type), with variants pre-bound.
-## A new motion only needs an entry here.
-func _register_motions() -> void:
-	_motions = {
-		"none": _finish_immediately,
-		"split_screen": _finish_immediately,
-		"cut": _execute_cut,
-		"pan": _execute_pan,
-		"zoom_in": _execute_zoom.bind(20.0),
-		"zoom_out": _execute_zoom.bind(60.0),
-		"shake": _execute_shake,
-		"dramatic_zoom": _execute_dramatic_zoom,
-		"spin": _execute_spin,
-		"overhead": _execute_overhead,
-		"low_angle": _execute_low_angle,
-		"dolly_in": _execute_dolly.bind(-0.5),
-		"dolly_out": _execute_dolly.bind(0.5),
-		# Pans and tilts rotate in place; trucks and pedestals translate
-		# locally. Both persist for the line: the next speaking line resets it.
-		"pan_left": _execute_rotate.bind(Vector3(0, deg_to_rad(15.0), 0)),
-		"pan_right": _execute_rotate.bind(Vector3(0, deg_to_rad(-15.0), 0)),
-		"pan_up": _execute_rotate.bind(Vector3(deg_to_rad(10.0), 0, 0)),
-		"pan_down": _execute_rotate.bind(Vector3(deg_to_rad(-10.0), 0, 0)),
-		"tilt_up": _execute_rotate.bind(Vector3(deg_to_rad(18.0), 0, 0)),
-		"tilt_down": _execute_rotate.bind(Vector3(deg_to_rad(-18.0), 0, 0)),
-		"rotate_cw": _execute_rotate.bind(Vector3(0, 0, deg_to_rad(-12.0))),
-		"rotate_ccw": _execute_rotate.bind(Vector3(0, 0, deg_to_rad(12.0))),
-		"truck_left": _execute_translate.bind(Vector3(-0.4, 0, 0)),
-		"truck_right": _execute_translate.bind(Vector3(0.4, 0, 0)),
-		"pedestal_up": _execute_translate.bind(Vector3(0, 0.3, 0)),
-		"pedestal_down": _execute_translate.bind(Vector3(0, -0.3, 0)),
-		"cross_dissolve": _execute_cross_dissolve,
-		"tracking": _execute_tracking,
-		"dutch_tilt": _execute_dutch_tilt,
-		"reset": _execute_reset,
-	}
 
-func execute_motion(motion_data: Dictionary, target_bench_index: int = -1):
-	if not _resolve_camera():
-		Log.warn("CameraDirector", "No current Camera3D; skipping camera motion.")
-		motion_completed.emit()
-		return
-
-	_motion_generation += 1
-	if _active_tween != null and _active_tween.is_valid():
-		_active_tween.kill()
-	_active_tween = null
-
-	var motion_type = motion_data.get("type", "none")
-	var duration = float(motion_data.get("duration", 1.0))
-	var easing_str = motion_data.get("easing", "ease-in-out")
-
-	var handler: Callable = _motions.get(motion_type, _finish_immediately)
-	handler.call(target_bench_index, duration, _parse_ease(easing_str), _parse_trans(easing_str))
-
-func _finish_immediately(
-	_bench_index: int, _duration: float, _ease_type: Tween.EaseType, _trans_type: Tween.TransitionType
-):
-	_finish_motion(_motion_generation)
-
-func _execute_cut(bench_index: int, _duration: float, _ease_type: Tween.EaseType, _trans_type: Tween.TransitionType):
-	if _bench_camera and bench_index >= 0:
-		_bench_camera.jump_to_bench(bench_index, false)
-	_finish_motion(_motion_generation)
-
-func _execute_pan(bench_index: int, duration: float, _ease_type: Tween.EaseType, _trans_type: Tween.TransitionType):
-	if _bench_camera and bench_index >= 0:
-		_bench_camera.jump_to_bench(bench_index, true)
-	# Captured before the await: a motion started while this one is in
-	# flight supersedes it, and a superseded motion must not report.
-	var generation := _motion_generation
-	await get_tree().create_timer(duration).timeout
-	_finish_motion(generation)
-
-func _execute_zoom(
-	_bench_index: int,
-	duration: float,
-	ease_type: Tween.EaseType,
-	trans_type: Tween.TransitionType,
-	target_fov: float
-):
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.tween_property(_camera, "fov", target_fov, duration)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-func _execute_shake(
-	_bench_index: int,
-	duration: float,
-	_ease_type: Tween.EaseType,
-	_trans_type: Tween.TransitionType,
-	intensity: float = 0.02
-):
-	# Captured before the await: a motion started while this one is in
-	# flight supersedes it, and a superseded motion must not report.
-	var generation := _motion_generation
-	await ScreenEffects.screen_shake(duration, intensity)
-	_finish_motion(generation)
-
-func _execute_dramatic_zoom(
-	bench_index: int, duration: float, _ease_type: Tween.EaseType, _trans_type: Tween.TransitionType
-):
-	if _bench_camera and bench_index >= 0:
-		_bench_camera.jump_to_bench(bench_index, true)
-
-	var tween = _new_tween()
-	tween.tween_property(_camera, "fov", 20.0, duration * 0.6).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_BACK)
-	tween.finished.connect(func():
-		_execute_shake(bench_index, duration * 0.4, Tween.EASE_IN_OUT, Tween.TRANS_CUBIC, 0.015)
-	)
-
-func _execute_spin(_bench_index: int, duration: float, ease_type: Tween.EaseType, trans_type: Tween.TransitionType):
-	var start_rot = _camera.rotation.y
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.tween_property(_camera, "rotation:y", start_rot + TAU, duration)
-	var generation := _motion_generation
-	tween.finished.connect(func():
-		_camera.rotation.y = start_rot
-		_finish_motion(generation)
-	)
-
-func _execute_overhead(_bench_index: int, duration: float, ease_type: Tween.EaseType, trans_type: Tween.TransitionType):
-	var overhead_pos = Vector3(0, 2.0, 0)
-	var overhead_rot = Vector3(-PI / 2, 0, 0)
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.set_parallel(true)
-	tween.tween_property(_camera, "global_position", overhead_pos, duration)
-	tween.tween_property(_camera, "rotation", overhead_rot, duration)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-func _execute_low_angle(
-	_bench_index: int, duration: float, ease_type: Tween.EaseType, trans_type: Tween.TransitionType
-):
-	var low_pos = _camera.global_position + Vector3(0, -0.3, 0)
-	var low_rot = _camera.rotation + Vector3(0.2, 0, 0)
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.set_parallel(true)
-	tween.tween_property(_camera, "global_position", low_pos, duration)
-	tween.tween_property(_camera, "rotation", low_rot, duration)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-func _execute_dolly(
-	_bench_index: int,
-	duration: float,
-	ease_type: Tween.EaseType,
-	trans_type: Tween.TransitionType,
-	distance: float
-):
-	var forward = -_camera.global_transform.basis.z
-	var target_pos = _camera.global_position + forward * distance
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.tween_property(_camera, "global_position", target_pos, duration)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-## Relative delta, in radians per axis.
-func _execute_rotate(
-	_bench_index: int,
-	duration: float,
-	ease_type: Tween.EaseType,
-	trans_type: Tween.TransitionType,
-	delta_rot: Vector3
-):
-	var target_rot = _camera.rotation + delta_rot
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.tween_property(_camera, "rotation", target_rot, duration)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-## Local-space offset: x is right, y is up.
-func _execute_translate(
-	_bench_index: int,
-	duration: float,
-	ease_type: Tween.EaseType,
-	trans_type: Tween.TransitionType,
-	local_offset: Vector3
-):
-	var basis = _camera.global_transform.basis
-	var world_offset = basis.x * local_offset.x + basis.y * local_offset.y + basis.z * local_offset.z
-	var target_pos = _camera.global_position + world_offset
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.tween_property(_camera, "global_position", target_pos, duration)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-func _execute_cross_dissolve(
-	_bench_index: int, duration: float, _ease_type: Tween.EaseType, _trans_type: Tween.TransitionType
-):
-	# Captured before the await: a motion started while this one is in
-	# flight supersedes it, and a superseded motion must not report.
-	var generation := _motion_generation
-	await ScreenEffects.cross_dissolve(duration)
-	_finish_motion(generation)
-
-func _execute_tracking(
-	bench_index: int, duration: float, _ease_type: Tween.EaseType, _trans_type: Tween.TransitionType
-):
-	if _bench_camera and bench_index >= 0:
-		_bench_camera.jump_to_bench(bench_index, true)
-	# Captured before the await: a motion started while this one is in
-	# flight supersedes it, and a superseded motion must not report.
-	var generation := _motion_generation
-	await get_tree().create_timer(duration).timeout
-	_finish_motion(generation)
-
-func _execute_dutch_tilt(
-	_bench_index: int, duration: float, ease_type: Tween.EaseType, trans_type: Tween.TransitionType
-):
-	var tilt_angle = deg_to_rad(15.0)
-	var original_z = _camera.rotation.z
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.tween_property(_camera, "rotation:z", tilt_angle, duration * 0.3)
-	tween.tween_interval(duration * 0.4)
-	tween.tween_property(_camera, "rotation:z", original_z, duration * 0.3)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-func _execute_reset(_bench_index: int, duration: float, ease_type: Tween.EaseType, trans_type: Tween.TransitionType):
-	var tween = _new_tween()
-	tween.set_ease(ease_type)
-	tween.set_trans(trans_type)
-	tween.set_parallel(true)
-	tween.tween_property(_camera, "fov", _original_fov, duration)
-	tween.tween_property(_camera, "rotation:z", 0.0, duration)
-	tween.finished.connect(_finish_motion.bind(_motion_generation))
-
-## Reports only for the motion that is still current. Without the guard a
-## superseded motion emits motion_completed for the one that replaced it.
-func _finish_motion(generation: int) -> void:
-	if generation != _motion_generation:
-		return
-	motion_completed.emit()
-
-
-func _new_tween() -> Tween:
-	_active_tween = _camera.create_tween()
-	return _active_tween
-
-func _parse_ease(easing_str: String) -> Tween.EaseType:
-	match easing_str:
+func _parse_ease(easing: String) -> Tween.EaseType:
+	match easing:
 		"ease-in":
 			return Tween.EASE_IN
 		"ease-out":
 			return Tween.EASE_OUT
-		"ease-in-out":
-			return Tween.EASE_IN_OUT
-		"linear":
-			return Tween.EASE_IN_OUT
 		_:
 			return Tween.EASE_IN_OUT
 
-func _parse_trans(easing_str: String) -> Tween.TransitionType:
-	if easing_str == "linear":
+
+func _parse_trans(easing: String) -> Tween.TransitionType:
+	if easing == "linear":
 		return Tween.TRANS_LINEAR
 	return Tween.TRANS_CUBIC
-

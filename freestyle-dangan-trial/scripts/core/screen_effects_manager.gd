@@ -120,7 +120,18 @@ func _play_for(player: AnimationPlayer, anim: String, duration: float) -> void:
 func _current_camera() -> Camera3D:
 	return get_viewport().get_camera_3d()
 
-func screen_shake(duration: float, intensity: float = 0.02):
+## `is_abandoned` lets the caller stop this mid-shake. It matters because this
+## is the one effect that writes the camera transform every frame from an
+## origin captured when it started: CameraDirector cancels a superseded motion,
+## and without a way to hear that, a shake kept dragging the camera back to a
+## pre-supersede position for its full duration and then restored it there for
+## good - discarding wherever the new motion had moved to.
+##
+## On abandonment it returns WITHOUT restoring, deliberately. The camera
+## belongs to whatever replaced this shake; putting it back would be the bug.
+func screen_shake(
+	duration: float, intensity: float = 0.02, is_abandoned: Callable = Callable()
+):
 	var camera := _current_camera()
 	if camera == null:
 		Log.warn("ScreenEffects", "No current Camera3D; skipping screen shake.")
@@ -137,6 +148,10 @@ func screen_shake(duration: float, intensity: float = 0.02):
 		# A scene change mid-shake frees the camera under us, and the position
 		# this was restoring belonged to a room that no longer exists.
 		if not is_instance_valid(camera):
+			return
+		# Checked before the write, so once superseded this never touches the
+		# camera again - not even for the frame it is being torn down in.
+		if is_abandoned.is_valid() and is_abandoned.call():
 			return
 		var offset = Vector3(
 			rng.randf_range(-intensity, intensity),
