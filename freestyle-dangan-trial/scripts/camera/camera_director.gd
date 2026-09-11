@@ -78,10 +78,12 @@ func _register_motions() -> void:
 		"truck_right": TranslateMotion.new(Vector3(0.4, 0, 0)),
 		"pedestal_up": TranslateMotion.new(Vector3(0, 0.3, 0)),
 		"pedestal_down": TranslateMotion.new(Vector3(0, -0.3, 0)),
-		# Backwards for dolly_in, which is wrong and is preserved here on
-		# purpose so this refactor changes nothing an author can see. See #282.
-		"dolly_in": TranslateMotion.new(Vector3(0, 0, 0.5)),
-		"dolly_out": TranslateMotion.new(Vector3(0, 0, -0.5)),
+		# A Camera3D looks along its local -Z, so dollying in is negative z.
+		# These were the other way round, and self-consistently so: the old
+		# _execute_dolly negated `forward` and was then bound a negative
+		# distance, and the two cancelled.
+		"dolly_in": TranslateMotion.new(Vector3(0, 0, -0.5)),
+		"dolly_out": TranslateMotion.new(Vector3(0, 0, 0.5)),
 		"cross_dissolve": CrossDissolveMotion.new(),
 		"dutch_tilt": DutchTiltMotion.new(),
 		"reset": ResetMotion.new(),
