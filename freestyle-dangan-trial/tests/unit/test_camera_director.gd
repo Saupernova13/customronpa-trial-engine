@@ -260,3 +260,44 @@ func test_a_truck_moves_along_the_cameras_own_right_axis() -> void:
 	assert_int(await _run_motion({"type": "truck_right", "duration": MOTION_DURATION})).is_equal(1)
 	# Yawed 90 degrees, the camera's right points down -Z in world space.
 	assert_float(camera.global_position.z).is_equal_approx(-0.4, 0.05)
+
+
+# ---------------------------------------------------------------------------
+# Which way each local-axis motion actually goes.
+#
+# dolly_in used to move the camera backwards: it was bound to a negative
+# distance against a `forward` that was already negated, so the two cancelled.
+# The truck and pedestal beside it went through a different function and were
+# right, which is why the pair read as correct. These pin all six, so the next
+# person editing this table cannot quietly swap another one.
+# ---------------------------------------------------------------------------
+func _after_motion(motion_type: String) -> Camera3D:
+	var camera := _camera()
+	camera.global_position = Vector3.ZERO
+	camera.rotation = Vector3.ZERO
+	await get_tree().process_frame
+	assert_int(await _run_motion({"type": motion_type, "duration": MOTION_DURATION})).is_equal(1)
+	return camera
+
+
+func test_dolly_in_moves_towards_what_the_camera_is_looking_at() -> void:
+	# A Camera3D looks along its local -Z, so moving in means negative z.
+	var camera := await _after_motion("dolly_in")
+	assert_float(camera.global_position.z).override_failure_message(
+		"dolly_in ended at z=%s; moving in means negative z" % camera.global_position.z
+	).is_equal_approx(-0.5, 0.05)
+
+
+func test_dolly_out_moves_away_from_what_the_camera_is_looking_at() -> void:
+	var camera := await _after_motion("dolly_out")
+	assert_float(camera.global_position.z).is_equal_approx(0.5, 0.05)
+
+
+func test_truck_left_and_right_move_along_the_world_x_axis_unrotated() -> void:
+	assert_float((await _after_motion("truck_left")).global_position.x).is_equal_approx(-0.4, 0.05)
+	assert_float((await _after_motion("truck_right")).global_position.x).is_equal_approx(0.4, 0.05)
+
+
+func test_pedestal_up_and_down_move_along_the_world_y_axis_unrotated() -> void:
+	assert_float((await _after_motion("pedestal_up")).global_position.y).is_equal_approx(0.3, 0.05)
+	assert_float((await _after_motion("pedestal_down")).global_position.y).is_equal_approx(-0.3, 0.05)

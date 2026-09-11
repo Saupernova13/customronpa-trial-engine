@@ -2,12 +2,8 @@ extends CameraMotion
 ## Move along the camera's own axes by a fixed offset: the truck_*, pedestal_*
 ## and dolly_* motions.
 ##
-## x is right, y is up, z is back - a Camera3D looks along its local -Z.
-##
-## The dolly offsets are the ones that look wrong, and are: dolly_in is bound
-## to +z, which moves the camera backwards. That is the behaviour this replaced
-## and it is preserved here deliberately, so this refactor changes nothing an
-## author can see. See #282, which fixes it on its own.
+## x is right, y is up, z is back - a Camera3D looks along its local -Z, so a
+## motion that moves towards the subject is bound a negative z.
 
 var _local_offset: Vector3
 
