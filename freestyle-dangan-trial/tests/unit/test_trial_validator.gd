@@ -83,11 +83,11 @@ func test_an_unknown_game_type_still_loads() -> void:
 	assert_array(errors).is_empty()
 
 
-func test_a_known_game_type_is_one_the_runner_can_actually_run() -> void:
-	# MinigameRunner's registry is the normative list, and the schema's enum is
-	# pinned to it by test_trial_manifest.gd - so the validator agreeing with
-	# the registry is what makes the three sources one.
-	for game_type in MinigameRunner.MINIGAME_SCRIPTS:
+func test_a_known_game_type_is_one_the_engine_can_actually_run() -> void:
+	# MinigameCatalog is the normative list, and the schema's enum is pinned to
+	# it by test_trial_manifest.gd - so the validator agreeing with the catalog
+	# is what makes the three sources one.
+	for game_type in MinigameCatalog.SCRIPTS:
 		var errors := TrialValidator.validate({
 			"trialName": "T",
 			"characters": [],

@@ -60,7 +60,8 @@ conventions, and dev workflow — that document is kept current.
 GDScript, organized under `freestyle-dangan-trial/scripts/`:
 
 ```
-core/       Autoload singletons (see below) + trial/ loader helpers and AudioStreamLoader
+core/       Autoload singletons (see below) + trial/ loader helpers, the
+            minigame catalog and AudioStreamLoader
 camera/     CameraDirector autoload + bench_focus_camera rig
 config/     MinigameConfig (tuning constants), ResourceRegistry (scene keys), UITheme
 effects/    Spawnable effect scenes' scripts (drift popup, panel shatter, shard burst)
@@ -101,7 +102,7 @@ sprite-texture cache. `TrialRoomManager` is a composition root that wires
 3. Speaking/narrator lines go through `DialogueBox` (typewriter, highlights,
    voice); camera and screen effects come from per-line script data.
 4. A minigame line hands off to `MinigameRunner`, which instantiates the
-   matching `MinigameBase` subclass (`MinigameRunner.MINIGAME_SCRIPTS`). The
+   matching `MinigameBase` subclass (`MinigameCatalog.SCRIPTS`). The
    base class provides lifecycle, timers, managed signal connections, and
    standard HUD setup via `ResourceRegistry`. Success advances the script;
    failure replays the minigame; a depleted influence gauge ends in the
@@ -118,10 +119,13 @@ against another except the first two, so work down the list in order.
    a closed list, so a trial using an unlisted type fails schema validation
    before anything else gets a chance to run. This is the "To change the
    format" workflow above, and it comes first for the same reason.
-2. **`MinigameRunner.MINIGAME_SCRIPTS`** — the script path, keyed by
-   `gameType`. This table is normative: `TrialValidator` warns about a type
-   that is not in it, and `test_trial_manifest.gd` asserts it matches the
-   schema enum exactly, so step 1 without this one fails CI.
+2. **`MinigameCatalog.SCRIPTS`** (`scripts/core/trial/minigame_catalog.gd`) —
+   the script path, keyed by `gameType`. This table is normative:
+   `TrialValidator` warns about a type that is not in it, and
+   `test_trial_manifest.gd` asserts it matches the schema enum exactly, so
+   step 1 without this one fails CI. It sits in the data layer because both
+   the validator and `MinigameRunner` read it, and the validator runs during
+   parsing, before any scene exists.
 3. **`scripts/minigames/my_game.gd`** — the `MinigameBase` subclass. Implement
    `start()`, call `_finish(success, data)`, and override `validate_data()` if
    empty or malformed authoring can make it unwinnable — `MinigameRunner`

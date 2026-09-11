@@ -87,7 +87,7 @@ func test_schema_game_types_match_the_runner_registry() -> void:
 	var minigame_def: Dictionary = schema["$defs"]["minigame"]
 	var enum_values: Array = minigame_def["properties"]["gameType"]["enum"]
 	assert_array(enum_values).contains_exactly_in_any_order(
-		MinigameRunner.MINIGAME_SCRIPTS.keys()
+		MinigameCatalog.SCRIPTS.keys()
 	)
 
 

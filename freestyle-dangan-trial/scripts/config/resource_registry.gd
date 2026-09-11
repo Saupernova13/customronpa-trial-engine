@@ -10,11 +10,11 @@ extends RefCounted
 ##
 ## - **Scene transitions** (`change_scene_to_file`) name their target inline.
 ##   They are control flow, not instantiation, and nothing caches them.
-## - **Script preloads** - `MinigameRunner.MINIGAME_SCRIPTS`,
-##   `trial_file_picker.gd`, `dialogue_box.gd`. MINIGAME_SCRIPTS especially is
-##   normative on purpose: `TrialValidator` checks gameType against it and
-##   test_trial_manifest pins it to the schema's enum, so it has to stay one
-##   table keyed by gameType rather than becoming scene keys here.
+## - **Script preloads** - `MinigameCatalog.SCRIPTS`, `trial_file_picker.gd`,
+##   `dialogue_box.gd`. The catalog especially is normative on purpose:
+##   `TrialValidator` checks gameType against it and test_trial_manifest pins
+##   it to the schema's enum, so it has to stay one table keyed by gameType
+##   rather than becoming scene keys here.
 ## - **Data and shaders** - `data/*.json`, `shaders/*.gdshader`.
 ## - **Two title-card textures**, loaded on demand for the one hardcoded
 ##   orange-frame case (`minigame_title_card.gd`). These are the arguable ones;

@@ -12,7 +12,7 @@ extends GdUnitTestSuite
 
 
 func _probe(game_type: String, type_specific: Dictionary) -> MinigameBase:
-	var script: GDScript = load(MinigameRunner.MINIGAME_SCRIPTS[game_type])
+	var script: GDScript = load(MinigameCatalog.SCRIPTS[game_type])
 	var game: MinigameBase = auto_free(script.new())
 	game.initialize(MinigameData.from_dict({
 		"gameId": "mg_probe",
