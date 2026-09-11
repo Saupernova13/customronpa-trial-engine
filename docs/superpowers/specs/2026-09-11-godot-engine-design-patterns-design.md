@@ -70,7 +70,7 @@ scene layer), and it removes an inverted dependency.
 
 **Blocks.** Refactor 2.
 
-### 2. Composite + Chain of Responsibility — validation rules
+### 2. Composite — validation rules
 
 **Problem.** `TrialValidator.validate()` is a 60-line static function
 running five unrelated structural checks; `_dangling_references()` is
@@ -88,8 +88,14 @@ severities, so "fatal" becomes a property of the finding rather than a
 choice of which function to call. `validate()` keeps its current signature
 and semantics for callers.
 
-**Buys.** Testability (a rule at a time), duplication (the three dangling-id
+**Buys.** Testability (a rule at a time), duplication (the four dangling-id
 scans share one shape), and it makes the error/warning split declarative.
+
+**Not Chain of Responsibility**, which this was first written down as. A chain
+means each handler decides whether to handle the request and whether to pass it
+on. Every rule here runs unconditionally and none can stop a later one, so the
+composite is the whole pattern; naming the chain as well would be a label with
+nothing behind it.
 
 **Depends on** refactor 1.
 
