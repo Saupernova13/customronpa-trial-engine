@@ -66,7 +66,8 @@ camera/     CameraDirector autoload, motions/ (one CameraMotion per editor
             motion name) and the bench_focus_camera rig
 config/     MinigameConfig (tuning constants), ResourceRegistry (scene keys), UITheme
 effects/    Spawnable effect scenes' scripts (drift popup, panel shatter, shard burst)
-game/       TrialRoomManager (composition root), CharacterStage, MinigameRunner, roaming text
+game/       TrialRoomManager (composition root), CharacterStage,
+            SpeakerPresenter, MinigameRunner, roaming text
 minigames/  MinigameBase + one script per minigame type; debate/ for shared pieces
 tools/      Start-menu file picker, small editor/debug helpers
 ui/         DialogueBox, HUD gauges, cards, settings menu, mobile touch HUD
@@ -75,8 +76,11 @@ ui/         DialogueBox, HUD gauges, cards, settings menu, mobile touch HUD
 `TrialLoader` is a thin facade: `core/trial/trial_archive.gd` does ZIP
 extraction and `core/trial/character_library.gd` owns character data and the
 sprite-texture cache. `TrialRoomManager` is a composition root that wires
-`ScriptDirector` signals to `CharacterStage` (3D bench sprites) and
-`MinigameRunner` (the minigame catalog and replay loop).
+`ScriptDirector` signals to `CharacterStage` (3D bench sprites),
+`SpeakerPresenter` (the conversation UI's name and portrait, including the
+sprite fallback chain) and `MinigameRunner` (the replay loop). Deciding
+whether to present a speaker stays with the manager; presenting is the
+presenter's.
 
 ### Autoloads (project.godot)
 
