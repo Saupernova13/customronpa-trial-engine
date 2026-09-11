@@ -137,58 +137,10 @@ func test_a_dangling_reference_warns_rather_than_rejecting_the_trial() -> void:
 	assert_array(errors).is_empty()
 
 
-func test_dangling_references_are_all_found_in_one_pass() -> void:
-	var dangling := TrialValidator._dangling_references(_trial({
-		"characters": ["CH_1"],
-		"truthBullets": [{"bulletId": "tb_1"}],
-		"script": {
-			"lines": [
-				{"id": "l1", "type": "minigame", "minigameId": "mg_gone"},
-				{"id": "l2", "type": "speaking", "characterId": "CH_GONE", "dialogue": "x"},
-				{"id": "l3", "type": "speaking", "characterId": "CH_1", "dialogue": "y"},
-			]
-		},
-		"minigames": [
-			{
-				"gameId": "mg_1",
-				"gameType": "nonstop_debate",
-				"typeSpecific": {
-					"selectedBullets": ["tb_1", "tb_gone"],
-					"dialogueLines": [{"lineId": "dl1", "answerBulletId": "tb_also_gone"}],
-				},
-			}
-		],
-	}))
-	# A missing minigame, a missing character, a missing selected bullet and a
-	# missing answer bullet.
-	assert_array(dangling).has_size(4)
-
-
-func test_a_coherent_trial_has_no_dangling_references() -> void:
-	var dangling := TrialValidator._dangling_references(_trial({
-		"characters": ["CH_1"],
-		"truthBullets": [{"bulletId": "tb_1"}],
-		"script": {"lines": [{"id": "l1", "type": "speaking", "characterId": "CH_1"}]},
-		"minigames": [
-			{
-				"gameId": "mg_1",
-				"gameType": "nonstop_debate",
-				"typeSpecific": {
-					"selectedBullets": ["tb_1"],
-					"dialogueLines": [{"lineId": "dl1", "answerBulletId": "tb_1"}],
-				},
-			}
-		],
-	}))
-	assert_array(dangling).is_empty()
-
-
-func test_an_empty_character_id_is_unset_rather_than_dangling() -> void:
-	# The editor writes "" for a speaking line with no character chosen.
-	var dangling := TrialValidator._dangling_references(_trial({
-		"script": {"lines": [{"id": "l1", "type": "speaking", "characterId": ""}]},
-	}))
-	assert_array(dangling).is_empty()
+## The three tests that used to call TrialValidator._dangling_references()
+## directly now live in test_validation_rules.gd, against the rule itself, and
+## in test_validation_report.gd, against the composite's report. Reaching for a
+## private static was the only way to see those findings at all.
 
 
 ## check_version's edges. The policy is deliberately lax - an unrecognised
