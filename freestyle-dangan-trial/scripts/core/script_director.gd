@@ -3,13 +3,11 @@ extends Node
 ## coordinates pause, settings and auto-skip. Reacts to InputManager's signals
 ## rather than running its own _input().
 
-## MINIGAME_LOADING and MINIGAME_RESULT are assigned and never compared
-## against, which reads like dead weight - but their job is to make the
-## WAITING_FOR_ADVANCE guards false. While the director sits in either one,
-## _on_advance_input returns early and _process skips both the hold-to-skip
-## and the auto-advance timer, so player input cannot step the script out from
-## under a minigame or its result card. A state can earn its place by not
-## matching.
+## What each state permits is state_steps_script() and state_is_pausable()
+## below, not a comparison at each call site. MINIGAME_LOADING and
+## MINIGAME_RESULT are assigned and never compared against anywhere, which used
+## to need a paragraph of explanation; they answer false to stepping the script,
+## which is the whole reason they exist.
 enum State {
 	IDLE,
 	DIALOGUE,
@@ -101,6 +99,31 @@ func start_trial():
 
 func _transition_to(new_state: State):
 	current_state = new_state
+
+# ---------------------------------------------------------------------------
+# What a state permits
+#
+# Asked, never compared. "May the script be stepped forward from here?" was
+# written out three times - in _on_advance_input and in both branches of
+# _process - so a fourth caller had to know to ask it a fourth time, and the
+# states that exist only to answer no needed a comment to say so.
+# ---------------------------------------------------------------------------
+
+## Whether player input or a timer may move to the next line.
+##
+## Only while the current line has been presented and is waiting. Every
+## minigame state answers false, so input cannot step the script out from under
+## a minigame or the result card that follows it; PAUSED answers false for the
+## same reason, which is why _on_advance_input needs no separate pause guard.
+static func state_steps_script(state: State) -> bool:
+	return state == State.WAITING_FOR_ADVANCE
+
+## Whether pausing this state is meaningful.
+##
+## IDLE and TRIAL_COMPLETE are not: there is nothing to come back to, and
+## recording PAUSED over either would lose the only state that means anything.
+static func state_is_pausable(state: State) -> bool:
+	return state != State.IDLE and state != State.TRIAL_COMPLETE
 
 ## Walks forward until a handler takes a line, or the script runs out. The
 ## stepping is the cursor's; what is left here is what to do with each line.
@@ -198,9 +221,7 @@ func notify_typewriter_finished():
 # Input reactions
 # ---------------------------------------------------------------------------
 func _on_advance_input() -> void:
-	if current_state == State.PAUSED:
-		return
-	if current_state != State.WAITING_FOR_ADVANCE:
+	if not state_steps_script(current_state):
 		return
 	if is_typewriter_active:
 		typewriter_skip_requested.emit()
@@ -230,7 +251,7 @@ func pause_trial():
 	_pause_depth += 1
 	if _pause_depth > 1:
 		return
-	if current_state != State.IDLE and current_state != State.TRIAL_COMPLETE:
+	if state_is_pausable(current_state):
 		_pre_pause_state = current_state
 		_transition_to(State.PAUSED)
 	_set_minigame_paused(true)
@@ -260,7 +281,7 @@ func get_current_line() -> ScriptLine:
 	return _cursor.current()
 
 func _process(delta):
-	if _skip_held and current_state == State.WAITING_FOR_ADVANCE:
+	if _skip_held and state_steps_script(current_state):
 		_skip_timer += delta
 		if _skip_timer >= MinigameConfig.SKIP_INTERVAL:
 			_skip_timer = 0.0
@@ -270,7 +291,12 @@ func _process(delta):
 				advance_to_next_line()
 		return
 
-	if Settings and Settings.auto_advance and current_state == State.WAITING_FOR_ADVANCE and not is_typewriter_active:
+	if (
+		Settings
+		and Settings.auto_advance
+		and state_steps_script(current_state)
+		and not is_typewriter_active
+	):
 		_auto_advance_timer += delta
 		if _auto_advance_timer >= Settings.auto_advance_delay:
 			_auto_advance_timer = 0.0
