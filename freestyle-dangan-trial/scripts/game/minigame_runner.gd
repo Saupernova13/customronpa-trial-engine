@@ -15,8 +15,8 @@ var _attempts: int = 0
 var _conversation_ui: CanvasItem
 var _roaming_text: CanvasItem
 var _dialogue_label: Node
-var _conversation_ui_was_visible: bool = true
-var _roaming_text_was_visible: bool = true
+## Null until the conversation UI is hidden; see _hide_conversation_ui.
+var _hidden_ui: UiVisibilitySnapshot = null
 
 func setup(conversation_ui: Node, roaming_text: Node, dialogue_label: Node) -> void:
 	_conversation_ui = conversation_ui as CanvasItem
@@ -155,15 +155,13 @@ func _skip_unsupported_type(minigame: MinigameData) -> void:
 
 func _hide_conversation_ui() -> void:
 	# The roaming text belongs to the dialogue presentation, so it hides too.
-	if _conversation_ui:
-		_conversation_ui_was_visible = _conversation_ui.visible
-		_conversation_ui.visible = false
-	if _roaming_text:
-		_roaming_text_was_visible = _roaming_text.visible
-		_roaming_text.visible = false
+	_hidden_ui = UiVisibilitySnapshot.hide_all([_conversation_ui, _roaming_text])
 
+## A no-op when nothing was hidden. The paths that return before the hide -
+## an unsupported type, unplayable data - never reach this, and putting back
+## what was never taken should not make anything appear.
 func _restore_conversation_ui() -> void:
-	if _conversation_ui:
-		_conversation_ui.visible = _conversation_ui_was_visible
-	if _roaming_text:
-		_roaming_text.visible = _roaming_text_was_visible
+	if _hidden_ui == null:
+		return
+	_hidden_ui.restore()
+	_hidden_ui = null
