@@ -4,9 +4,9 @@ extends RefCounted
 ## and this file must track it, but only two things are actually enforced: the
 ## editor cross-checks its own validator against the schema case by case
 ## (web-ui-editor/tests/schema.test.js), and test_trial_manifest.gd pins the
-## gameType enum to MinigameRunner's registry. Everything else here can drift
-## from the schema without CI noticing - the missing per-line required-field
-## checks especially.
+## gameType enum to MinigameCatalog. Everything else here can drift from the
+## schema without CI noticing - the missing per-line required-field checks
+## especially.
 ##
 ## Deliberately laxer than the editor: checks only what playback needs, so
 ## imperfect files stay playable and per-line problems warn instead of failing.
@@ -191,16 +191,16 @@ static func _dangling_references(data: Dictionary) -> Array[String]:
 
 ## A warning, not an error: an unknown type is skipped at runtime with a notice
 ## rather than making the trial unloadable, and check_version deliberately
-## accepts a newer minor that might carry one. MinigameRunner's registry is the
-## normative list - test_trial_manifest.gd pins it to the schema's enum - so
-## naming it at load makes the problem visible before the player reaches it.
+## accepts a newer minor that might carry one. MinigameCatalog is the normative
+## list - test_trial_manifest.gd pins it to the schema's enum - so naming it at
+## load makes the problem visible before the player reaches it.
 static func _warn_unknown_game_types(minigames: Array) -> void:
 	var unknown: Array[String] = []
 	for mg in minigames:
 		if not mg is Dictionary:
 			continue
 		var game_type = mg.get("gameType")
-		if not game_type is String or MinigameRunner.MINIGAME_SCRIPTS.has(game_type):
+		if not game_type is String or MinigameCatalog.has_type(game_type):
 			continue
 		if not unknown.has(game_type):
 			unknown.append(game_type)

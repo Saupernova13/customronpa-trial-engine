@@ -55,7 +55,7 @@ func test_the_navigation_event_is_left_for_the_gui_stage() -> void:
 
 
 func test_mass_panic_no_longer_reads_keycodes_itself() -> void:
-	var script: GDScript = load(MinigameRunner.MINIGAME_SCRIPTS["mass_panic_debate"])
+	var script: GDScript = load(MinigameCatalog.SCRIPTS["mass_panic_debate"])
 	var names: Array = script.get_script_method_list().map(
 		func(entry: Dictionary) -> String: return entry["name"]
 	)
@@ -65,7 +65,7 @@ func test_mass_panic_no_longer_reads_keycodes_itself() -> void:
 
 
 func test_a_focus_step_wraps_around_the_rows() -> void:
-	var script: GDScript = load(MinigameRunner.MINIGAME_SCRIPTS["mass_panic_debate"])
+	var script: GDScript = load(MinigameCatalog.SCRIPTS["mass_panic_debate"])
 	var game: MinigameBase = auto_free(script.new())
 	game.focused_row = 0
 	assert_int(game._next_row(-1)).is_equal(2)

@@ -11,7 +11,7 @@ extends GdUnitTestSuite
 
 
 func _debate(lines: Array) -> MinigameBase:
-	var script: GDScript = load(MinigameRunner.MINIGAME_SCRIPTS["nonstop_debate"])
+	var script: GDScript = load(MinigameCatalog.SCRIPTS["nonstop_debate"])
 	var game: MinigameBase = auto_free(script.new())
 	game.initialize(MinigameData.from_dict({
 		"gameId": "mg_nd",

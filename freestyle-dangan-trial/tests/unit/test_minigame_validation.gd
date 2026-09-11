@@ -3,11 +3,11 @@ extends GdUnitTestSuite
 ## minigames spin on it: nothing spawns, nothing can be hit, the timer expires
 ## and the attempt replays identically.
 
-## Builds an initialised instance the way MinigameRunner's probe does. Nothing
+## Builds an initialised instance the way MinigameCatalog's probe does. Nothing
 ## is added to the tree and start() is never called, so validate_data() sees
 ## exactly what the runner sees.
 func _probe(game_type: String, type_specific: Dictionary) -> MinigameBase:
-	var script: GDScript = load(MinigameRunner.MINIGAME_SCRIPTS[game_type])
+	var script: GDScript = load(MinigameCatalog.SCRIPTS[game_type])
 	var game: MinigameBase = auto_free(script.new())
 	game.initialize(MinigameData.from_dict({
 		"gameType": game_type,

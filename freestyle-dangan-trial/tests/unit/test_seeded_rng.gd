@@ -25,7 +25,7 @@ const GLOBAL_RNG_CALLS := [
 
 
 func _probe_scrum() -> MinigameBase:
-	var script: GDScript = load(MinigameRunner.MINIGAME_SCRIPTS["debate_scrum"])
+	var script: GDScript = load(MinigameCatalog.SCRIPTS["debate_scrum"])
 	var game: MinigameBase = auto_free(script.new())
 	game.initialize(MinigameData.from_dict({"gameId": "mg_s", "gameType": "debate_scrum"}))
 	game._defense_buttons.resize(5)

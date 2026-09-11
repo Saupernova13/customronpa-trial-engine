@@ -3,19 +3,6 @@ extends Node
 ## Runs a trial's minigame line: title card, then a replay loop where only
 ## success advances. Hides the conversation UI and reports to ScriptDirector.
 
-## gameType -> script path. A new minigame needs one entry here plus a
-## MinigameBase subclass.
-const MINIGAME_SCRIPTS := {
-	"nonstop_debate": "res://scripts/minigames/nonstop_debate.gd",
-	"hangmans_gambit": "res://scripts/minigames/hangmans_gambit.gd",
-	"logic_dive": "res://scripts/minigames/logic_dive.gd",
-	"debate_scrum": "res://scripts/minigames/debate_scrum.gd",
-	"mass_panic_debate": "res://scripts/minigames/mass_panic_debate.gd",
-	"rebuttal_showdown": "res://scripts/minigames/rebuttal_showdown.gd",
-	"psyche_taxi": "res://scripts/minigames/psyche_taxi.gd",
-	"closing_argument": "res://scripts/minigames/closing_argument.gd",
-}
-
 ## Three of the eight minigames never damage the influence gauge, so for them a
 ## round that cannot be won - a time limit shorter than the game takes, a stub
 ## that always overruns - replays forever, and the settings menu has no quit.
@@ -37,13 +24,13 @@ func setup(conversation_ui: Node, roaming_text: Node, dialogue_label: Node) -> v
 	_dialogue_label = dialogue_label
 
 func run(minigame: MinigameData) -> void:
-	if not MINIGAME_SCRIPTS.has(minigame.game_type):
+	if not MinigameCatalog.has_type(minigame.game_type):
 		await _skip_unsupported_type(minigame)
 		return
 
 	# Before the conversation UI is hidden and before the title card, so a
 	# minigame that cannot be played is never presented as one.
-	var errors: Array[String] = _validation_errors(minigame)
+	var errors: Array[String] = MinigameCatalog.validation_errors(minigame)
 	if not errors.is_empty():
 		_skip_unplayable(minigame, errors)
 		return
@@ -68,7 +55,7 @@ func run(minigame: MinigameData) -> void:
 
 func _start_attempt(minigame_data: MinigameData) -> void:
 	_attempts += 1
-	var minigame: MinigameBase = _instantiate(minigame_data.game_type)
+	var minigame: MinigameBase = MinigameCatalog.create(minigame_data.game_type)
 	if minigame == null:
 		_abort(minigame_data.game_type)
 		return
@@ -98,19 +85,6 @@ func _start_attempt(minigame_data: MinigameData) -> void:
 	ScriptDirector.on_minigame_started(minigame)
 	minigame.start()
 
-## validate_data() needs an initialised instance, and the one that actually
-## plays is not built until the title card has finished. This probe is never
-## added to the tree and start() is never called on it.
-func _validation_errors(minigame_data: MinigameData) -> Array[String]:
-	var probe: MinigameBase = _instantiate(minigame_data.game_type)
-	if probe == null:
-		# _start_attempt reports and recovers from a failed instantiation.
-		return []
-	probe.initialize(minigame_data)
-	var errors: Array[String] = probe.validate_data()
-	probe.free()
-	return errors
-
 ## An authoring error must not be a soft-lock. Four minigames spin on empty
 ## data - nothing spawns, nothing can be hit, the timer expires, the attempt
 ## replays identically - and the diagnostics they do emit are Log.info, which
@@ -128,21 +102,6 @@ func _skip_unplayable(minigame_data: MinigameData, errors: Array[String]) -> voi
 		6.0
 	)
 	ScriptDirector.on_minigame_finished()
-
-## Returns null on any of the three ways this can fail; each one logs which.
-func _instantiate(game_type: String) -> MinigameBase:
-	if not MINIGAME_SCRIPTS.has(game_type):
-		Log.error("MinigameRunner", "No script registered for minigame type: %s" % game_type)
-		return null
-	var path: String = MINIGAME_SCRIPTS[game_type]
-	var script: GDScript = load(path)
-	if script == null:
-		Log.error("MinigameRunner", "Failed to load minigame script: %s" % path)
-		return null
-	var instance := script.new() as MinigameBase
-	if instance == null:
-		Log.error("MinigameRunner", "%s does not extend MinigameBase" % path)
-	return instance
 
 ## The UI is already hidden and ScriptDirector is parked in MINIGAME_LOADING by
 ## this point, so bailing out silently freezes the trial with no way back. Put

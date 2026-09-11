@@ -16,8 +16,8 @@ func test_no_minigame_resets_the_influence_gauge() -> void:
 	# game-over screen was unreachable for six of the eight. The reset belongs
 	# to the runner, once per minigame line.
 	var offenders: Array[String] = []
-	for game_type in MinigameRunner.MINIGAME_SCRIPTS:
-		var path: String = MinigameRunner.MINIGAME_SCRIPTS[game_type]
+	for game_type in MinigameCatalog.SCRIPTS:
+		var path: String = MinigameCatalog.SCRIPTS[game_type]
 		if _source_of(path).contains("InfluenceGauge.reset("):
 			offenders.append(path)
 	assert_array(offenders).is_empty()
