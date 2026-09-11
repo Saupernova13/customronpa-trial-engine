@@ -29,9 +29,20 @@ signal trial_ended
 signal typewriter_skip_requested
 
 var current_state: State = State.IDLE
-var script_lines: Array[ScriptLine] = []
-var current_line_index: int = -1
 var is_typewriter_active: bool = false
+
+## The walk itself: the line array, the index, and which types nothing plays.
+## ScriptCursor owns all three, so the two properties below are the names the
+## rest of the engine and the tests already use, forwarded to it.
+var _cursor := ScriptCursor.new()
+
+var script_lines: Array[ScriptLine]:
+	get: return _cursor.lines
+	set(value): _cursor.lines = value
+
+var current_line_index: int:
+	get: return _cursor.index
+	set(value): _cursor.index = value
 
 var _active_minigame: Node = null
 var _settings_menu: Node = null
@@ -52,6 +63,9 @@ func _ready():
 		ScriptLine.TYPE_NARRATOR: _handle_narrator_line,
 		ScriptLine.TYPE_MINIGAME: _handle_minigame_line,
 	}
+	# The handler table IS the set of playable types, so the cursor reads it
+	# rather than keeping a second list that could fall out of step.
+	_cursor = ScriptCursor.new(_line_handlers.keys())
 	InputManager.advance_pressed.connect(_on_advance_input)
 	InputManager.settings_toggle_requested.connect(_on_settings_toggle_requested)
 	InputManager.skip_held_changed.connect(_on_skip_held_changed)
@@ -71,7 +85,7 @@ func reset() -> void:
 	_skip_timer = 0.0
 	_pause_depth = 0
 	_pre_pause_state = State.IDLE
-	current_line_index = -1
+	_cursor.rewind()
 	_transition_to(State.IDLE)
 
 func start_trial():
@@ -82,52 +96,44 @@ func start_trial():
 		return
 
 	Log.info("ScriptDirector", "Starting trial with %d lines" % script_lines.size())
-	current_line_index = -1
 	_transition_to(State.DIALOGUE)
 	advance_to_next_line()
 
 func _transition_to(new_state: State):
 	current_state = new_state
 
-## Skipping is iterative, not recursive. A skipped line used to advance by
-## calling this from inside itself, so a run of unplayable lines recursed once
-## per line - and TrialValidator deliberately lets unknown line types through
-## with a warning, so a trial from a newer minor format could overflow the
-## stack instead of stepping over them.
+## Walks forward until a handler takes a line, or the script runs out. The
+## stepping is the cursor's; what is left here is what to do with each line.
+##
+## Every line the walk passes is announced, skipped ones included: listeners key
+## their per-line effects off line_started, and skipping quietly is not the same
+## as never mentioning the line.
 func advance_to_next_line():
-	var skipped_types: Array[String] = []
-	while true:
-		current_line_index += 1
-
-		if current_line_index >= script_lines.size():
-			_report_skipped_types(skipped_types)
-			Log.info("ScriptDirector", "End of script reached")
-			_transition_to(State.TRIAL_COMPLETE)
-			trial_ended.emit()
-			return
-
-		var line: ScriptLine = script_lines[current_line_index]
+	while _cursor.advance():
+		var line: ScriptLine = _cursor.current()
 		line_started.emit(line)
 
-		var handler: Callable = _line_handlers.get(line.type, Callable())
-		if not handler.is_valid():
-			if not skipped_types.has(line.type):
-				skipped_types.append(line.type)
+		if not _cursor.current_is_playable():
 			continue
-		# Handlers return false when they could not play the line, and the loop
+		# Handlers return false when they could not play the line, and the walk
 		# moves on to the next one.
-		if handler.call(line):
-			_report_skipped_types(skipped_types)
+		if _line_handlers[line.type].call(line):
+			_report_skipped_types()
 			return
+
+	_report_skipped_types()
+	Log.info("ScriptDirector", "End of script reached")
+	_transition_to(State.TRIAL_COMPLETE)
+	trial_ended.emit()
 
 ## One message per run of skipped lines rather than one per line. A block of
 ## unknown types is a single authoring or version problem, and push_warning is
 ## expensive enough that a thousand of them cost far more than the skipping.
-func _report_skipped_types(types: Array[String]) -> void:
+func _report_skipped_types() -> void:
+	var types := _cursor.take_skipped_types()
 	if types.is_empty():
 		return
 	Log.warn("ScriptDirector", "Skipped lines with unknown types: %s" % ", ".join(types))
-	types.clear()
 
 func _handle_speaking_line(line: ScriptLine) -> bool:
 	_transition_to(State.DIALOGUE)
@@ -251,9 +257,7 @@ func _set_minigame_paused(paused: bool) -> void:
 		_active_minigame.resume()
 
 func get_current_line() -> ScriptLine:
-	if current_line_index >= 0 and current_line_index < script_lines.size():
-		return script_lines[current_line_index]
-	return null
+	return _cursor.current()
 
 func _process(delta):
 	if _skip_held and current_state == State.WAITING_FOR_ADVANCE:
